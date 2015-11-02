@@ -11,21 +11,53 @@ namespace TransactionCompletedException
     {
         static void Main(string[] args)
         {
-            AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
-            using (var txScope = new TransactionScope())
+            Console.WriteLine($"Running on Thread {Thread.CurrentThread.ManagedThreadId}");
+
+            Console.WriteLine("Complete the transaction scope? [Y|N] ");
+            string completeKey = Console.ReadKey().KeyChar.ToString().ToUpperInvariant();
+            Console.WriteLine("Behavior?");
+            Console.WriteLine("Throw inside TransactionCompleted event [A]");
+            Console.WriteLine("Throw inside Prepare phase [P]");
+            Console.WriteLine("Throw inside Commit phase [C]");
+            Console.WriteLine("Throw inside Rollback phase [R]");
+            string behaviorKey = Console.ReadKey().KeyChar.ToString().ToUpperInvariant();
+            Console.WriteLine();
+
+            Console.WriteLine("Attach UnhandledException handler? [U]");
+            string globalCatch = Console.ReadKey().KeyChar.ToString().ToUpperInvariant();
+            if (globalCatch == "U")
             {
-                Transaction.Current.EnlistDurable(Guid.NewGuid(), new FakeResourceManager(),
+                AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
+            }
+
+            using (var scope = new TransactionScope())
+            {
+                Transaction.Current.EnlistDurable(Guid.NewGuid(), new FakeResourceManager(behaviorKey),
                     EnlistmentOptions.None);
 
-                Transaction.Current.TransactionCompleted += (sender, eventArgs) =>
+                Transaction.Current.TransactionCompleted += (sender, e) =>
                 {
-                    Console.WriteLine(
-                        $"Status {eventArgs.Transaction.TransactionInformation.Status} Thread {Thread.CurrentThread.ManagedThreadId}");
+                    Console.WriteLine("A transaction has completed:");
+                    Console.WriteLine("ID:             {0}", e.Transaction.TransactionInformation.LocalIdentifier);
+                    Console.WriteLine("Distributed ID: {0}", e.Transaction.TransactionInformation.DistributedIdentifier);
+                    Console.WriteLine("Status:         {0}", e.Transaction.TransactionInformation.Status);
+                    Console.WriteLine("IsolationLevel: {0}", e.Transaction.IsolationLevel);
+                    Console.WriteLine("Thread: {0}", Thread.CurrentThread.ManagedThreadId);
 
-                    // throw inside Complete
-                    throw new InvalidOperationException();
+                    if (behaviorKey == "A")
+                    {
+                        throw new InvalidOperationException();
+                    }
                 };
-                //txScope.Complete();
+
+                switch (completeKey)
+                {
+                    case "Y":
+                        scope.Complete();
+                        break;
+                    case "N":
+                        break;
+                }
             }
 
             Console.ReadLine();
@@ -38,15 +70,25 @@ namespace TransactionCompletedException
 
         class FakeResourceManager : IEnlistmentNotification
         {
+            private readonly string key;
+
+            public FakeResourceManager(string key)
+            {
+                this.key = key;
+            }
+
             public void Prepare(PreparingEnlistment preparingEnlistment)
             {
                 preparingEnlistment.Prepared();
+                if (key == "P")
+                {
+                    throw new InvalidOperationException();
+                }
                 Console.WriteLine("Prepared");
             }
 
             public void Commit(Enlistment enlistment)
             {
-                //throw new InvalidOperationException();
                 enlistment.Done();
                 Console.WriteLine("Committed");
             }
